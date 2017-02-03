@@ -7,11 +7,12 @@ import akka.Done
 import akka.stream._
 import akka.stream.alpakka.amqp._
 import akka.stream.scaladsl.{GraphDSL, Keep, Merge, Sink, Source}
+import akka.stream.testkit.TestSubscriber.Probe
 import akka.stream.testkit.scaladsl.TestSink
 import akka.stream.testkit.{TestPublisher, TestSubscriber}
 import akka.util.ByteString
 
-import scala.concurrent.Promise
+import scala.concurrent.{Await, Promise}
 import scala.concurrent.duration._
 
 /**
@@ -88,7 +89,7 @@ class AmqpConnectorsSpec extends AmqpSpec {
       )
 
       amqpSource
-        .map(b => OutgoingMessage(b.bytes.concat(ByteString("a")), false, false, Some(b.properties)))
+        .map(b => OutgoingMessage[ByteString](b.bytes.concat(ByteString("a")), false, false, Some(b.properties)))
         .runWith(amqpSink)
 
       probe.request(5).expectNextUnorderedN(input.map(s => ByteString(s.concat("a")))).expectComplete()
@@ -120,8 +121,8 @@ class AmqpConnectorsSpec extends AmqpSpec {
       amqpSource
         .mapConcat { b =>
           List(
-            OutgoingMessage(b.bytes.concat(ByteString("a")), false, false, Some(b.properties)),
-            OutgoingMessage(b.bytes.concat(ByteString("aa")), false, false, Some(b.properties))
+            OutgoingMessage[ByteString](b.bytes.concat(ByteString("a")), false, false, Some(b.properties)),
+            OutgoingMessage[ByteString](b.bytes.concat(ByteString("aa")), false, false, Some(b.properties))
           )
         }
         .runWith(amqpSink)
@@ -145,7 +146,7 @@ class AmqpConnectorsSpec extends AmqpSpec {
 
     "handle missing reply-to header correctly" in {
 
-      val outgoingMessage = OutgoingMessage(ByteString.empty, false, false, None)
+      val outgoingMessage = OutgoingMessage[ByteString](ByteString.empty, false, false, None)
 
       Source
         .single(outgoingMessage)
@@ -166,6 +167,78 @@ class AmqpConnectorsSpec extends AmqpSpec {
 
     }
 
+    "handle manually acked sources" in {
+      val queueName = "amqp-conn-it-spec-ack-queue-" + System.currentTimeMillis()
+      val queueDeclaration = QueueDeclaration(queueName)
+
+      val amqpSink = AmqpSink.simple(
+        AmqpSinkSettings(DefaultAmqpConnection).withRoutingKey(queueName).withDeclarations(queueDeclaration)
+      )
+
+      val input = Vector("one", "two", "three", "four", "five")
+      Source(input).map(s => ByteString(s)).runWith(amqpSink)
+
+      val amqpSource: Probe[IncomingMessageWithAck[ByteString]] = AmqpSource
+        .withoutAutoAck(
+          NamedQueueSourceSettings(DefaultAmqpConnection, queueName),
+          bufferSize = 1
+        )
+        .take(input.size)
+        .runWith(TestSink.probe)
+        .request(1)
+
+      input.reverse.tail.reverse.foreach { e =>
+        val n = amqpSource.expectNext()
+
+        n.bytes.utf8String should equal(e)
+
+        amqpSource.request(1)
+        amqpSource.expectNoMsg(200.milliseconds)
+        n.ack
+      }
+
+      val n = amqpSource.expectNext()
+      n.bytes.utf8String should equal("five")
+
+      amqpSource
+        .expectComplete()
+
+    }
+
+    "requeue nacked sources" in {
+      val queueName = "amqp-conn-it-spec-nack-queue-" + System.currentTimeMillis()
+      val queueDeclaration = QueueDeclaration(queueName)
+
+      val amqpSink = AmqpSink.simple(
+        AmqpSinkSettings(DefaultAmqpConnection).withRoutingKey(queueName).withDeclarations(queueDeclaration)
+      )
+
+      val input = Vector("one")
+      Await.result(Source(input).map(s => ByteString(s)).runWith(amqpSink), 1.second)
+
+      val amqpSource: Probe[IncomingMessageWithAck[ByteString]] = AmqpSource
+        .withoutAutoAck(
+          NamedQueueSourceSettings(DefaultAmqpConnection, queueName),
+          bufferSize = 5
+        )
+        .runWith(TestSink.probe)
+        .request(1)
+
+      val first = amqpSource.expectNext()
+
+      first.bytes.utf8String should equal("one")
+      first.nack(true)
+
+      amqpSource.request(1)
+      val second = amqpSource.expectNext()
+
+      second.bytes.utf8String should equal("one")
+      second.nack(false)
+      amqpSource.request(1)
+
+      amqpSource.expectNoMsg()
+    }
+
     "publish from one source and consume elements with multiple sinks" in {
       val queueName = "amqp-conn-it-spec-work-queues-" + System.currentTimeMillis()
       val queueDeclaration = QueueDeclaration(queueName)
@@ -179,7 +252,7 @@ class AmqpConnectorsSpec extends AmqpSpec {
       val mergedSources = Source.fromGraph(GraphDSL.create() { implicit b =>
         import GraphDSL.Implicits._
         val count = 3
-        val merge = b.add(Merge[IncomingMessage](count))
+        val merge = b.add(Merge[IncomingMessage[ByteString]](count))
         for (n <- 0 until count) {
           val source = b.add(
             AmqpSource(
@@ -211,7 +284,7 @@ class AmqpConnectorsSpec extends AmqpSpec {
       )
 
       val publisher = TestPublisher.probe[ByteString]()
-      val subscriber = TestSubscriber.probe[IncomingMessage]()
+      val subscriber = TestSubscriber.probe[IncomingMessage[ByteString]]()
       amqpSink.addAttributes(Attributes.inputBuffer(1, 1)).runWith(Source.fromPublisher(publisher))
       amqpSource.addAttributes(Attributes.inputBuffer(1, 1)).runWith(Sink.fromSubscriber(subscriber))
 
@@ -261,7 +334,7 @@ class AmqpConnectorsSpec extends AmqpSpec {
       )
 
       val publisher = TestPublisher.probe[ByteString]()
-      val subscriber = TestSubscriber.probe[IncomingMessage]()
+      val subscriber = TestSubscriber.probe[IncomingMessage[ByteString]]()
       amqpSink.addAttributes(Attributes.inputBuffer(1, 1)).runWith(Source.fromPublisher(publisher))
       amqpSource.addAttributes(Attributes.inputBuffer(1, 1)).runWith(Sink.fromSubscriber(subscriber))
 
@@ -292,7 +365,7 @@ class AmqpConnectorsSpec extends AmqpSpec {
       subscriber.cancel()
       publisher.sendComplete()
 
-      val subscriber2 = TestSubscriber.probe[IncomingMessage]()
+      val subscriber2 = TestSubscriber.probe[IncomingMessage[ByteString]]()
       amqpSource.addAttributes(Attributes.inputBuffer(1, 1)).runWith(Sink.fromSubscriber(subscriber2))
 
       subscriber2.ensureSubscription()

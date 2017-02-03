@@ -25,15 +25,16 @@ object AmqpRpcFlowStage {
  *                            can be overridden per message by including `expectedReplies` in the the header of the [[OutgoingMessage]]
  */
 final class AmqpRpcFlowStage(settings: AmqpSinkSettings, bufferSize: Int, responsesPerMessage: Int = 1)
-    extends GraphStageWithMaterializedValue[FlowShape[OutgoingMessage, IncomingMessage], Future[String]]
+    extends GraphStageWithMaterializedValue[FlowShape[OutgoingMessage[ByteString], IncomingMessage[ByteString]],
+                                            Future[String]]
     with AmqpConnector { stage =>
 
   import AmqpRpcFlowStage._
 
-  val in = Inlet[OutgoingMessage]("AmqpRpcFlow.in")
-  val out = Outlet[IncomingMessage]("AmqpRpcFlow.out")
+  val in = Inlet[OutgoingMessage[ByteString]]("AmqpRpcFlow.in")
+  val out = Outlet[IncomingMessage[ByteString]]("AmqpRpcFlow.out")
 
-  override def shape: FlowShape[OutgoingMessage, IncomingMessage] = FlowShape.of(in, out)
+  override def shape: FlowShape[OutgoingMessage[ByteString], IncomingMessage[ByteString]] = FlowShape.of(in, out)
 
   override protected def initialAttributes: Attributes = defaultAttributes
 
@@ -44,7 +45,7 @@ final class AmqpRpcFlowStage(settings: AmqpSinkSettings, bufferSize: Int, respon
       override val settings = stage.settings
       private val exchange = settings.exchange.getOrElse("")
       private val routingKey = settings.routingKey.getOrElse("")
-      private val queue = mutable.Queue[IncomingMessage]()
+      private val queue = mutable.Queue[IncomingMessage[ByteString]]()
       private var queueName: String = _
       private var outstandingMessages = 0
 
@@ -108,7 +109,7 @@ final class AmqpRpcFlowStage(settings: AmqpSinkSettings, bufferSize: Int, respon
         promise.success(queueName)
       }
 
-      def handleDelivery(message: IncomingMessage): Unit =
+      def handleDelivery(message: IncomingMessage[ByteString]): Unit =
         if (isAvailable(out)) {
           pushAndAckMessage(message)
         } else {
@@ -119,7 +120,7 @@ final class AmqpRpcFlowStage(settings: AmqpSinkSettings, bufferSize: Int, respon
           }
         }
 
-      def pushAndAckMessage(message: IncomingMessage): Unit = {
+      def pushAndAckMessage(message: IncomingMessage[ByteString]): Unit = {
         push(out, message)
         // ack it as soon as we have passed it downstream
         // TODO ack less often and do batch acks with multiple = true would probably be more performant

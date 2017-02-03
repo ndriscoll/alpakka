@@ -21,8 +21,11 @@ lazy val alpakka = project
 
 lazy val amqp = project
   .enablePlugins(AutomateHeaderPlugin)
+  .disablePlugins(BintrayPlugin)
   .settings(
     name := "akka-stream-alpakka-amqp",
+    version := "0.5.3-sigfig",
+    publishTo := Some("SigFig Third Party" at "https://artifactory.sigfig.us/artifactory/thirdparty-release-local"),
     Dependencies.Amqp
   )
 
