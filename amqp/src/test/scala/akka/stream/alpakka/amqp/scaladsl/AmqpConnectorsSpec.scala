@@ -178,7 +178,7 @@ class AmqpConnectorsSpec extends AmqpSpec {
       val input = Vector("one", "two", "three", "four", "five")
       Source(input).map(s => ByteString(s)).runWith(amqpSink)
 
-      val amqpSource: Probe[IncomingMessageWithAck[ByteString]] = AmqpSource
+      val amqpSource: Probe[UnackedIncomingMessage[ByteString]] = AmqpSource
         .withoutAutoAck(
           NamedQueueSourceSettings(DefaultAmqpConnection, queueName),
           bufferSize = 1
@@ -216,7 +216,7 @@ class AmqpConnectorsSpec extends AmqpSpec {
       val input = Vector("one")
       Await.result(Source(input).map(s => ByteString(s)).runWith(amqpSink), 1.second)
 
-      val amqpSource: Probe[IncomingMessageWithAck[ByteString]] = AmqpSource
+      val amqpSource: Probe[UnackedIncomingMessage[ByteString]] = AmqpSource
         .withoutAutoAck(
           NamedQueueSourceSettings(DefaultAmqpConnection, queueName),
           bufferSize = 5

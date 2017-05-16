@@ -80,7 +80,7 @@ final class AmqpRpcFlowStage(settings: AmqpSinkSettings, bufferSize: Int, respon
               properties: BasicProperties,
               body: Array[Byte]
           ): Unit =
-            consumerCallback.invoke(IncomingMessage(ByteString(body), envelope, properties))
+            consumerCallback.invoke(AckedIncomingMessage(ByteString(body), envelope, properties))
 
           override def handleCancel(consumerTag: String): Unit =
             // non consumer initiated cancel, for example happens when the queue has been deleted.

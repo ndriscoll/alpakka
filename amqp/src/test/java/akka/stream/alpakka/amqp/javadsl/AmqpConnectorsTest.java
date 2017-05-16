@@ -72,7 +72,7 @@ public class AmqpConnectorsTest {
 
     //#create-source
     final Integer bufferSize = 10;
-    final Source<IncomingMessage<ByteString>, NotUsed> amqpSource = AmqpSource.create(
+    final Source<AckedIncomingMessage<ByteString>, NotUsed> amqpSource = AmqpSource.create(
       NamedQueueSourceSettings.create(
         DefaultAmqpConnection.getInstance(),
         queueName
@@ -107,7 +107,7 @@ public class AmqpConnectorsTest {
     //#create-rpc-flow
 
     final Integer bufferSize = 10;
-    final Source<IncomingMessage<ByteString>, NotUsed> amqpSource = AmqpSource.create(
+    final Source<AckedIncomingMessage<ByteString>, NotUsed> amqpSource = AmqpSource.create(
         NamedQueueSourceSettings.create(
             DefaultAmqpConnection.getInstance(),
             queueName
